@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "hyprmove.hyprlaunchtracker",
+  "name": "Launch Tracker",
+  "version": "1.0.0",
+  "author": "lvg",
+  "description": "Keeps an app on the workspace you launched it from. When a splash or loader window is followed by the real app window, the app window is moved back to the loader's workspace. The tracker runs while the plugin is enabled and stops when it is disabled.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Launch Tracker",
+    "description": "Status and timing settings for the launch tracker",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "aliases": [
+      "hyprmove",
+      "launch",
+      "workspace",
+      "splash"
+    ],
+    "defaults": {
+      "launchTtl": 30,
+      "matchWindow": 15,
+      "moveWindows": true,
+      "verbose": false
+    },
+    "schema": [
+      {
+        "key": "launchTtl",
+        "type": "integer",
+        "label": "Launch lifetime (seconds)",
+        "min": 1,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 30,
+        "description": "How long a launch is remembered after its last related window appears."
+      },
+      {
+        "key": "matchWindow",
+        "type": "integer",
+        "label": "Match window (seconds)",
+        "min": 1,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 15,
+        "description": "Windows that appear later than this after a launch are never treated as part of it."
+      },
+      {
+        "key": "moveWindows",
+        "type": "boolean",
+        "label": "Move windows",
+        "defaultValue": true,
+        "description": "Turn off to only log matches without moving anything."
+      },
+      {
+        "key": "verbose",
+        "type": "boolean",
+        "label": "Verbose logging",
+        "defaultValue": false
+      }
+    ]
+  }
+}
