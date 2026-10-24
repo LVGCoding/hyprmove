@@ -14,10 +14,11 @@ from typing import Optional
 # Configuration
 # ============================================================
 
-# Defaults. When running as the Omarchy plugin these are
-# overridden by the plugin's entry in ~/.config/omarchy/shell.json,
-# which the bar widget edits. The file is re-read whenever it
-# changes, so new values apply without a restart.
+# Fallback defaults. When running as the Omarchy plugin these are
+# replaced by barWidget.defaults in manifest.json, and those by the
+# plugin's entry in ~/.config/omarchy/shell.json, which the bar
+# widget edits. Both files are re-read whenever they change, so new
+# values apply without a restart.
 
 # How long a launch record should remain alive.
 LAUNCH_TTL = 30.0
@@ -39,6 +40,8 @@ SHELL_CONFIG = os.path.join(
     "omarchy",
     "shell.json",
 )
+
+MANIFEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "manifest.json")
 
 # shell.json key -> (global name, type)
 CONFIG_KEYS = {
@@ -127,7 +130,11 @@ def verbose(message: str):
 # Plugin settings
 # ============================================================
 
-config_mtime: Optional[float] = None
+# Values the script starts with, used when neither the manifest nor
+# shell.json gives a valid one.
+BUILTIN_DEFAULTS = {key: globals()[name] for key, (name, _) in CONFIG_KEYS.items()}
+
+config_mtimes: Optional[tuple] = None
 
 
 def find_plugin_entry(config) -> Optional[dict]:
@@ -159,53 +166,80 @@ def find_plugin_entry(config) -> Optional[dict]:
     return None
 
 
+def coerce_setting(kind, value):
+    """
+    Return value as kind, or None if it is not a valid setting.
+    """
+
+    if kind is bool:
+        return value if isinstance(value, bool) else None
+
+    if isinstance(value, bool):
+        return None
+
+    try:
+        value = kind(value)
+    except (TypeError, ValueError):
+        return None
+
+    return value if value > 0 else None
+
+
+def read_json(path: str):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        verbose(f"Could not read {path}: {e}")
+        return None
+
+
+def file_mtime(path: str) -> Optional[float]:
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return None
+
+
 def reload_config(force: bool = False):
     """
-    Apply settings from shell.json if the file changed since the
-    last read. Invalid or missing values keep their defaults.
+    Apply settings if shell.json or manifest.json changed since the
+    last read. Each setting comes from the shell.json entry, then the
+    manifest defaults, then BUILTIN_DEFAULTS, using the first valid one.
     """
 
-    global config_mtime
+    global config_mtimes
 
-    try:
-        mtime = os.stat(SHELL_CONFIG).st_mtime
-    except OSError:
+    mtimes = (file_mtime(SHELL_CONFIG), file_mtime(MANIFEST))
+
+    if not force and mtimes == config_mtimes:
         return
 
-    if not force and mtime == config_mtime:
-        return
+    config_mtimes = mtimes
 
-    config_mtime = mtime
+    manifest = read_json(MANIFEST)
+    bar_widget = manifest.get("barWidget") if isinstance(manifest, dict) else None
+    defaults = bar_widget.get("defaults") if isinstance(bar_widget, dict) else None
 
-    try:
-        with open(SHELL_CONFIG, "r") as f:
-            entry = find_plugin_entry(json.load(f))
-    except (OSError, json.JSONDecodeError) as e:
-        verbose(f"Could not read {SHELL_CONFIG}: {e}")
-        return
+    if not isinstance(defaults, dict):
+        defaults = {}
 
-    if entry is None:
-        return
+    entry = find_plugin_entry(read_json(SHELL_CONFIG)) or {}
 
     changed = []
 
     for key, (name, kind) in CONFIG_KEYS.items():
-        if key not in entry:
-            continue
+        value = None
 
-        value = entry[key]
+        for source in (entry, defaults):
+            if key in source:
+                value = coerce_setting(kind, source[key])
 
-        try:
-            if kind is bool:
-                if not isinstance(value, bool):
-                    continue
-            else:
-                value = kind(value)
+                if value is not None:
+                    break
 
-                if value <= 0:
-                    continue
-        except (TypeError, ValueError):
-            continue
+        if value is None:
+            value = BUILTIN_DEFAULTS[key]
 
         if globals()[name] != value:
             globals()[name] = value

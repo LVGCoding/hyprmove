@@ -5,10 +5,8 @@
   "version": "1.0.0",
   "author": "lvg",
   "description": "Keeps an app on the workspace you launched it from. When a splash or loader window is followed by the real app window, the app window is moved back to the loader's workspace. The tracker runs while the plugin is enabled and stops when it is disabled.",
-  "kinds": [
-    "service",
-    "bar-widget"
-  ],
+  "kinds": ["service", "bar-widget"],
+
   "entryPoints": {
     "service": "Service.qml",
     "barWidget": "BarWidget.qml"
@@ -19,17 +17,12 @@
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right",
-    "aliases": [
-      "hyprmove",
-      "launch",
-      "workspace",
-      "splash"
-    ],
+    "aliases": ["hyprmove", "launch", "workspace", "splash"],
     "defaults": {
       "launchTtl": 30,
       "matchWindow": 15,
       "moveWindows": true,
-      "verbose": false
+      "verbose": true
     },
     "schema": [
       {
@@ -63,7 +56,7 @@
         "key": "verbose",
         "type": "boolean",
         "label": "Verbose logging",
-        "defaultValue": false
+        "defaultValue": true
       }
     ]
   }
