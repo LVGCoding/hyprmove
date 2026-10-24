@@ -19,10 +19,27 @@
     "defaultSection": "right",
     "aliases": ["hyprmove", "launch", "workspace", "splash"],
     "defaults": {
-      "launchTtl": 30,
-      "matchWindow": 15,
+      "launchTtl": 15,
+      "matchWindow": 5,
       "moveWindows": true,
-      "verbose": true
+      "verbose": true,
+      "weightSamePid": 100,
+      "weightSamePidEnabled": true,
+      "weightLaunchAncestor": 80,
+      "weightLaunchAncestorEnabled": true,
+      "weightDescendant": 90,
+      "weightDescendantEnabled": true,
+      "weightSharedAncestry": 30,
+      "weightSharedAncestryEnabled": true,
+      "weightSameExecutable": 35,
+      "weightSameExecutableEnabled": true,
+      "weightSameInitialClass": 25,
+      "weightSameInitialClassEnabled": true,
+      "weightSameClass": 15,
+      "weightSameClassEnabled": true,
+      "weightExecutableInAncestry": 30,
+      "weightExecutableInAncestryEnabled": true,
+      "minScore": 40
     },
     "schema": [
       {
@@ -32,7 +49,7 @@
         "min": 1,
         "max": 600,
         "step": 1,
-        "defaultValue": 30,
+        "defaultValue": 15,
         "description": "How long a launch is remembered after its last related window appears."
       },
       {
@@ -42,7 +59,7 @@
         "min": 1,
         "max": 600,
         "step": 1,
-        "defaultValue": 15,
+        "defaultValue": 5,
         "description": "Windows that appear later than this after a launch are never treated as part of it."
       },
       {
@@ -57,6 +74,144 @@
         "type": "boolean",
         "label": "Verbose logging",
         "defaultValue": true
+      },
+      {
+        "key": "weightSamePid",
+        "type": "integer",
+        "label": "Weight: same PID",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 100,
+        "description": "The new window belongs to a process the launch already owns."
+      },
+      {
+        "key": "weightSamePidEnabled",
+        "type": "boolean",
+        "label": "Use weight: same PID",
+        "defaultValue": true
+      },
+      {
+        "key": "weightLaunchAncestor",
+        "type": "integer",
+        "label": "Weight: launch is an ancestor",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 80,
+        "description": "A launch process is an ancestor of the new window's process."
+      },
+      {
+        "key": "weightLaunchAncestorEnabled",
+        "type": "boolean",
+        "label": "Use weight: launch is an ancestor",
+        "defaultValue": true
+      },
+      {
+        "key": "weightDescendant",
+        "type": "integer",
+        "label": "Weight: descendant of launch window",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 90,
+        "description": "The new window's process descends from one of the launch's windows. Added once per such window."
+      },
+      {
+        "key": "weightDescendantEnabled",
+        "type": "boolean",
+        "label": "Use weight: descendant of launch window",
+        "defaultValue": true
+      },
+      {
+        "key": "weightSharedAncestry",
+        "type": "integer",
+        "label": "Weight: shared ancestry",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 30,
+        "description": "The new window shares process ancestry with one of the launch's windows. Added once per such window."
+      },
+      {
+        "key": "weightSharedAncestryEnabled",
+        "type": "boolean",
+        "label": "Use weight: shared ancestry",
+        "defaultValue": true
+      },
+      {
+        "key": "weightSameExecutable",
+        "type": "integer",
+        "label": "Weight: same executable",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 35,
+        "description": "The new window runs the same executable as the launch."
+      },
+      {
+        "key": "weightSameExecutableEnabled",
+        "type": "boolean",
+        "label": "Use weight: same executable",
+        "defaultValue": true
+      },
+      {
+        "key": "weightSameInitialClass",
+        "type": "integer",
+        "label": "Weight: same initial class",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 25,
+        "description": "The new window's initial class matches the launch."
+      },
+      {
+        "key": "weightSameInitialClassEnabled",
+        "type": "boolean",
+        "label": "Use weight: same initial class",
+        "defaultValue": true
+      },
+      {
+        "key": "weightSameClass",
+        "type": "integer",
+        "label": "Weight: same class",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 15,
+        "description": "The new window's class matches the launch."
+      },
+      {
+        "key": "weightSameClassEnabled",
+        "type": "boolean",
+        "label": "Use weight: same class",
+        "defaultValue": true
+      },
+      {
+        "key": "weightExecutableInAncestry",
+        "type": "integer",
+        "label": "Weight: executable in ancestry",
+        "min": 0,
+        "max": 500,
+        "step": 1,
+        "defaultValue": 30,
+        "description": "A launch executable appears in the new window's process ancestry."
+      },
+      {
+        "key": "weightExecutableInAncestryEnabled",
+        "type": "boolean",
+        "label": "Use weight: executable in ancestry",
+        "defaultValue": true
+      },
+      {
+        "key": "minScore",
+        "type": "integer",
+        "label": "Minimum score",
+        "min": 1,
+        "max": 1000,
+        "step": 1,
+        "defaultValue": 40,
+        "description": "A window is only moved if its best launch scores at least this and no other launch ties with it."
       }
     ]
   }

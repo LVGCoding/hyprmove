@@ -23,21 +23,67 @@ Item {
     return value === undefined || value === null ? defaults[name] : value
   }
 
-  // This widget's entry in shell.json. The bar hands a re-created widget
-  // (e.g. after a hot-reload) the settings its slot was first built with,
-  // which miss anything saved since, so read the entry from the live config
-  // and only fall back to the injected settings if it is not in the layout.
-  readonly property var entry: {
-    var config = bar && bar.shell ? bar.shell.barConfig : null
-    var layout = config && config.layout ? config.layout : {}
-    var sections = ["left", "center", "right"]
-    for (var s = 0; s < sections.length; s++) {
-      var entries = layout[sections[s]] || []
-      for (var i = 0; i < entries.length; i++)
-        if (entries[i] && entries[i].id === moduleName) return entries[i]
-    }
-    return widget.settings || {}
+  // This widget's entry in shell.json, read from the file itself. Neither
+  // copy the shell offers can be trusted: the settings the bar injects keep
+  // the values the slot was first built with (stale after a hot-reload), and
+  // bar.shell.barConfig lags one save behind. A save built on either undoes
+  // earlier changes. The injected settings only cover the first load.
+  property var entry: widget.settings || ({})
+
+  // The settings of the last save until shell.json shows them, so a reload
+  // that still has an earlier write can't roll the entry back meanwhile.
+  property string pendingSave: ""
+
+  function findEntry(config) {
+    if (!config) return null
+    var layout = config.bar && config.bar.layout ? config.bar.layout : {}
+    var entries = (layout.left || []).concat(layout.center || [], layout.right || [], config.plugins || [])
+    for (var i = 0; i < entries.length; i++)
+      if (entries[i] && entries[i].id === moduleName) return entries[i]
+    return null
   }
+
+  // Order-independent JSON of an entry's settings, without its id.
+  function settingsJson(settings) {
+    var keys = Object.keys(settings || {}).filter(function(k) { return k !== "id" }).sort()
+    return JSON.stringify(keys.map(function(k) { return [k, settings[k]] }))
+  }
+
+  function loadEntry(text) {
+    var found = null
+    try {
+      found = findEntry(JSON.parse(text))
+    } catch (e) {
+      return
+    }
+    if (!found) return
+    if (pendingSave !== "") {
+      if (settingsJson(found) !== pendingSave) return
+      pendingSave = ""
+      pendingSaveTimeout.stop()
+    }
+    entry = found
+  }
+
+  FileView {
+    id: shellConfigFile
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.loadEntry(text())
+  }
+
+  // If a save never shows up in the file, stop waiting for it.
+  Timer {
+    id: pendingSaveTimeout
+    interval: 2000
+    onTriggered: {
+      root.pendingSave = ""
+      shellConfigFile.reload()
+    }
+  }
+
   function toggle() { widget.toggle() }
   function close() { widget.close() }
   function switchPanel(direction) { return widget.switchPanel(direction) }
@@ -49,6 +95,43 @@ Item {
   readonly property int launchTtl: Math.round(Number(setting("launchTtl")))
   readonly property int matchWindow: Math.round(Number(setting("matchWindow")))
   readonly property bool moveWindows: setting("moveWindows") === true
+  readonly property int minScore: Math.round(Number(setting("minScore")) || 0)
+
+  // Points each signal adds when the script matches a new window to a launch.
+  readonly property var weightKeys: [
+    { key: "weightSamePid", label: "Same PID" },
+    { key: "weightDescendant", label: "Descendant" },
+    { key: "weightLaunchAncestor", label: "Launch ancestor" },
+    { key: "weightSharedAncestry", label: "Shared ancestry" },
+    { key: "weightSameExecutable", label: "Same executable" },
+    { key: "weightExecutableInAncestry", label: "Exe in ancestry" },
+    { key: "weightSameInitialClass", label: "Initial class" },
+    { key: "weightSameClass", label: "Class" }
+  ]
+  // Each weight also has a "<key>Enabled" flag that switches it off
+  // without losing its value.
+  readonly property var weightSettingKeys: {
+    var keys = ["minScore"]
+    for (var i = 0; i < weightKeys.length; i++)
+      keys.push(weightKeys[i].key, weightKeys[i].key + "Enabled")
+    return keys
+  }
+  readonly property bool weightsCustomized: customized(weightSettingKeys)
+  readonly property bool settingsCustomized: customized(Object.keys(entry))
+
+  // Whether any of these keys is saved with a value other than its default.
+  function customized(keys) {
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
+      if (key === "id" || entry[key] === undefined || entry[key] === null) continue
+      if (entry[key] !== defaults[key]) return true
+    }
+    return false
+  }
+
+  function weightEnabled(key) {
+    return setting(key + "Enabled") !== false
+  }
 
   property var service: null
   readonly property bool running: service ? service.running === true : false
@@ -63,11 +146,40 @@ Item {
   function saveSetting(key, value) {
     if (setting(key) === value) return
     var next = Object.assign({}, root.entry)
-    delete next.id
     next[key] = value
+    saveEntry(next)
+  }
+
+  // Drop the weights from the entry so they follow the manifest defaults.
+  function resetWeights() {
+    var next = Object.assign({}, root.entry)
+    for (var i = 0; i < weightSettingKeys.length; i++) delete next[weightSettingKeys[i]]
+    saveEntry(next)
+  }
+
+  // Drop every setting so the whole widget follows the manifest defaults.
+  function resetAll() {
+    resetArmed = false
+    saveEntry({})
+  }
+
+  // Resetting everything takes a second click within a few seconds.
+  property bool resetArmed: false
+
+  // Show the new settings straight away; shell.json catches up when the
+  // shell's write lands.
+  function saveEntry(next) {
+    delete next.id
+    root.entry = Object.assign({ id: root.moduleName }, next)
     root.widget.settings = next
-    if (bar && bar.shell && typeof bar.shell.updateEntryInline === "function")
-      bar.shell.updateEntryInline(root.moduleName, next)
+    if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
+    root.pendingSave = settingsJson(next)
+    pendingSaveTimeout.restart()
+    // false means shell.json already holds these settings, so no write is coming.
+    if (!bar.shell.updateEntryInline(root.moduleName, next)) {
+      root.pendingSave = ""
+      pendingSaveTimeout.stop()
+    }
   }
 
   function statusText() {
@@ -100,6 +212,7 @@ Item {
   }
 
   onBarChanged: findService()
+  onOpenedChanged: if (!opened) resetArmed = false
   Component.onCompleted: findService()
 
   // The service can be created after the widget on startup and replaced on
@@ -114,6 +227,12 @@ Item {
       else
         root.findService()
     }
+  }
+
+  Timer {
+    interval: 3000
+    running: root.resetArmed
+    onTriggered: root.resetArmed = false
   }
 
   implicitWidth: button.implicitWidth
@@ -176,7 +295,7 @@ Item {
             id: heroLabels
             anchors.left: heroIcon.right
             anchors.leftMargin: Style.space(14)
-            anchors.right: restartButton.left
+            anchors.right: heroButtons.left
             anchors.rightMargin: Style.space(10)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(2)
@@ -204,17 +323,34 @@ Item {
             }
           }
 
-          Button {
-            id: restartButton
+          Row {
+            id: heroButtons
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "󰑐"
-            tooltipText: "Restart tracker"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            bordered: true
-            visible: root.service !== null
-            onClicked: if (root.service) root.service.restart()
+            spacing: Style.space(8)
+
+            Button {
+              iconText: root.resetArmed ? "" : "󰦛"
+              text: root.resetArmed ? "Reset all?" : ""
+              tooltipText: root.resetArmed ? "Click again to reset every setting" : "Reset all settings to defaults"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              bordered: true
+              active: root.resetArmed
+              visible: root.settingsCustomized
+              onClicked: root.resetArmed ? root.resetAll() : root.resetArmed = true
+            }
+
+            Button {
+              id: restartButton
+              iconText: "󰑐"
+              tooltipText: "Restart tracker"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              bordered: true
+              visible: root.service !== null
+              onClicked: if (root.service) root.service.restart()
+            }
           }
         }
 
@@ -283,6 +419,109 @@ Item {
           foreground: root.foreground
           fontFamily: root.fontFamily
           onClicked: root.saveSetting("moveWindows", !root.moveWindows)
+        }
+
+        PanelSeparator { foreground: root.foreground }
+
+        // ---------- Match weights ----------
+        Column {
+          width: parent.width
+          spacing: Style.space(10)
+
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(weightsHeader.implicitHeight, resetWeightsButton.implicitHeight)
+
+            PanelSectionHeader {
+              id: weightsHeader
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "MATCH WEIGHTS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Button {
+              id: resetWeightsButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰦛"
+              tooltipText: "Reset weights to defaults"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              bordered: true
+              visible: root.weightsCustomized
+              onClicked: root.resetWeights()
+            }
+          }
+
+          Grid {
+            id: weightsGrid
+            width: parent.width
+            columns: 2
+            columnSpacing: Style.space(12)
+            rowSpacing: Style.space(10)
+
+            readonly property real cellWidth: (width - columnSpacing) / 2
+
+            Repeater {
+              model: root.weightKeys
+
+              Item {
+                id: weightCell
+                required property var modelData
+                readonly property bool weightOn: root.weightEnabled(modelData.key)
+                width: weightsGrid.cellWidth
+                implicitHeight: weightField.implicitHeight
+
+                NumberField {
+                  id: weightField
+                  label: weightCell.modelData.label
+                  value: Math.round(Number(root.setting(weightCell.modelData.key)) || 0)
+                  from: 0
+                  to: 500
+                  fieldWidth: weightCell.width - weightSwitch.width - Style.space(8)
+                  opacity: weightCell.weightOn ? 1 : 0.4
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  onModified: function(v) { root.saveSetting(weightCell.modelData.key, v) }
+                }
+
+                ToggleSwitch {
+                  id: weightSwitch
+                  anchors.right: parent.right
+                  y: weightField.field.y + (weightField.field.height - height) / 2
+                  checked: weightCell.weightOn
+                  foreground: root.foreground
+                  onToggled: root.saveSetting(weightCell.modelData.key + "Enabled", !weightCell.weightOn)
+                }
+              }
+            }
+
+            NumberField {
+              label: "Minimum score"
+              value: root.minScore
+              from: 1
+              to: 1000
+              fieldWidth: weightsGrid.cellWidth
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onModified: function(v) { root.saveSetting("minScore", v) }
+            }
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: "Each matching signal adds its weight to a launch's score. A window "
+              + "is moved to the best launch if it scores at least the minimum and "
+              + "no other launch ties. Switch a signal off to ignore it."
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
 
         PanelSeparator { foreground: root.foreground }

@@ -33,6 +33,32 @@ MOVE_WINDOWS = True
 # Print detailed process information.
 VERBOSE = False
 
+# Points each signal adds when matching a new window to a launch.
+# A window is only moved if its best launch scores at least
+# MIN_SCORE and no other launch ties with it. A signal adds nothing
+# when its weight is 0 or its WEIGHT_*_ENABLED flag is False.
+WEIGHT_SAME_PID = 100
+WEIGHT_LAUNCH_ANCESTOR = 80
+WEIGHT_DESCENDANT = 90
+WEIGHT_SHARED_ANCESTRY = 30
+WEIGHT_SAME_EXECUTABLE = 35
+WEIGHT_SAME_INITIAL_CLASS = 25
+WEIGHT_SAME_CLASS = 15
+WEIGHT_EXECUTABLE_IN_ANCESTRY = 30
+
+WEIGHT_SAME_PID_ENABLED = True
+WEIGHT_LAUNCH_ANCESTOR_ENABLED = True
+WEIGHT_DESCENDANT_ENABLED = True
+WEIGHT_SHARED_ANCESTRY_ENABLED = True
+WEIGHT_SAME_EXECUTABLE_ENABLED = True
+WEIGHT_SAME_INITIAL_CLASS_ENABLED = True
+WEIGHT_SAME_CLASS_ENABLED = True
+WEIGHT_EXECUTABLE_IN_ANCESTRY_ENABLED = True
+
+# Same executable alone (35) stays below this, so two independent
+# launches of the same program won't automatically get merged.
+MIN_SCORE = 40
+
 PLUGIN_ID = "hyprmove.hyprlaunchtracker"
 
 SHELL_CONFIG = os.path.join(
@@ -43,12 +69,29 @@ SHELL_CONFIG = os.path.join(
 
 MANIFEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "manifest.json")
 
-# shell.json key -> (global name, type)
+# shell.json key -> (global name, type, minimum)
 CONFIG_KEYS = {
-    "launchTtl": ("LAUNCH_TTL", float),
-    "matchWindow": ("MATCH_WINDOW", float),
-    "moveWindows": ("MOVE_WINDOWS", bool),
-    "verbose": ("VERBOSE", bool),
+    "launchTtl": ("LAUNCH_TTL", float, 1),
+    "matchWindow": ("MATCH_WINDOW", float, 1),
+    "moveWindows": ("MOVE_WINDOWS", bool, None),
+    "verbose": ("VERBOSE", bool, None),
+    "weightSamePid": ("WEIGHT_SAME_PID", int, 0),
+    "weightLaunchAncestor": ("WEIGHT_LAUNCH_ANCESTOR", int, 0),
+    "weightDescendant": ("WEIGHT_DESCENDANT", int, 0),
+    "weightSharedAncestry": ("WEIGHT_SHARED_ANCESTRY", int, 0),
+    "weightSameExecutable": ("WEIGHT_SAME_EXECUTABLE", int, 0),
+    "weightSameInitialClass": ("WEIGHT_SAME_INITIAL_CLASS", int, 0),
+    "weightSameClass": ("WEIGHT_SAME_CLASS", int, 0),
+    "weightExecutableInAncestry": ("WEIGHT_EXECUTABLE_IN_ANCESTRY", int, 0),
+    "weightSamePidEnabled": ("WEIGHT_SAME_PID_ENABLED", bool, None),
+    "weightLaunchAncestorEnabled": ("WEIGHT_LAUNCH_ANCESTOR_ENABLED", bool, None),
+    "weightDescendantEnabled": ("WEIGHT_DESCENDANT_ENABLED", bool, None),
+    "weightSharedAncestryEnabled": ("WEIGHT_SHARED_ANCESTRY_ENABLED", bool, None),
+    "weightSameExecutableEnabled": ("WEIGHT_SAME_EXECUTABLE_ENABLED", bool, None),
+    "weightSameInitialClassEnabled": ("WEIGHT_SAME_INITIAL_CLASS_ENABLED", bool, None),
+    "weightSameClassEnabled": ("WEIGHT_SAME_CLASS_ENABLED", bool, None),
+    "weightExecutableInAncestryEnabled": ("WEIGHT_EXECUTABLE_IN_ANCESTRY_ENABLED", bool, None),
+    "minScore": ("MIN_SCORE", int, 1),
 }
 
 
@@ -132,7 +175,7 @@ def verbose(message: str):
 
 # Values the script starts with, used when neither the manifest nor
 # shell.json gives a valid one.
-BUILTIN_DEFAULTS = {key: globals()[name] for key, (name, _) in CONFIG_KEYS.items()}
+BUILTIN_DEFAULTS = {key: globals()[name] for key, (name, _, _) in CONFIG_KEYS.items()}
 
 config_mtimes: Optional[tuple] = None
 
@@ -166,7 +209,7 @@ def find_plugin_entry(config) -> Optional[dict]:
     return None
 
 
-def coerce_setting(kind, value):
+def coerce_setting(kind, minimum, value):
     """
     Return value as kind, or None if it is not a valid setting.
     """
@@ -182,7 +225,7 @@ def coerce_setting(kind, value):
     except (TypeError, ValueError):
         return None
 
-    return value if value > 0 else None
+    return value if value >= minimum else None
 
 
 def read_json(path: str):
@@ -228,12 +271,12 @@ def reload_config(force: bool = False):
 
     changed = []
 
-    for key, (name, kind) in CONFIG_KEYS.items():
+    for key, (name, kind, minimum) in CONFIG_KEYS.items():
         value = None
 
         for source in (entry, defaults):
             if key in source:
-                value = coerce_setting(kind, source[key])
+                value = coerce_setting(kind, minimum, source[key])
 
                 if value is not None:
                     break
@@ -610,6 +653,13 @@ def score_match(
     score = 0
     reasons = []
 
+    def add(name: str, reason: str):
+        nonlocal score
+
+        if globals()[f"{name}_ENABLED"] and globals()[name]:
+            score += globals()[name]
+            reasons.append(reason)
+
     now = time.monotonic()
 
     age = now - launch.created_at
@@ -624,8 +674,7 @@ def score_match(
     # --------------------------------------------------------
 
     if window.pid in launch.pids:
-        score += 100
-        reasons.append("same PID")
+        add("WEIGHT_SAME_PID", "same PID")
 
     # --------------------------------------------------------
     # Process ancestry
@@ -634,8 +683,7 @@ def score_match(
     current_ancestors = ancestor_pids(window)
 
     if current_ancestors & launch.pids:
-        score += 80
-        reasons.append("launch PID is an ancestor")
+        add("WEIGHT_LAUNCH_ANCESTOR", "launch PID is an ancestor")
 
     # Check whether any original window's process is an
     # ancestor of the new process.
@@ -643,44 +691,38 @@ def score_match(
         old_tree = ancestor_pids(old_window)
 
         if old_window.pid in current_ancestors:
-            score += 90
-            reasons.append(f"new PID is descendant of PID {old_window.pid}")
+            add("WEIGHT_DESCENDANT", f"new PID is descendant of PID {old_window.pid}")
 
         if old_tree & current_ancestors:
-            score += 30
-            reasons.append("shared process ancestry")
+            add("WEIGHT_SHARED_ANCESTRY", "shared process ancestry")
 
     # --------------------------------------------------------
     # Executable
     # --------------------------------------------------------
 
     if current_exe and current_exe in launch.executables:
-        score += 35
-        reasons.append("same executable")
+        add("WEIGHT_SAME_EXECUTABLE", "same executable")
 
     # --------------------------------------------------------
     # Initial class
     # --------------------------------------------------------
 
     if window.initial_class and window.initial_class in launch.initial_classes:
-        score += 25
-        reasons.append("same initial class")
+        add("WEIGHT_SAME_INITIAL_CLASS", "same initial class")
 
     # --------------------------------------------------------
     # Normal class
     # --------------------------------------------------------
 
     if window.class_name and window.class_name in launch.classes:
-        score += 15
-        reasons.append("same class")
+        add("WEIGHT_SAME_CLASS", "same class")
 
     # --------------------------------------------------------
     # Process executable appears in ancestry
     # --------------------------------------------------------
 
     if launch.executables & ancestor_executables(window):
-        score += 30
-        reasons.append("launch executable in ancestry")
+        add("WEIGHT_EXECUTABLE_IN_ANCESTRY", "launch executable in ancestry")
 
     return score, reasons
 
@@ -725,10 +767,7 @@ def find_matching_launch(window: WindowInfo):
             return None
 
     # Require a reasonably strong match.
-    #
-    # Same executable alone is only 35 points, so two independent
-    # launches of the same program won't automatically get merged.
-    if best_score < 40:
+    if best_score < MIN_SCORE:
         return None
 
     return best_launch, best_score, best_reasons
