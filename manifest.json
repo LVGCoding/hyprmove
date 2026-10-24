@@ -32,13 +32,13 @@
       "weightSharedAncestry": 30,
       "weightSharedAncestryEnabled": true,
       "weightSameExecutable": 35,
-      "weightSameExecutableEnabled": true,
+      "weightSameExecutableEnabled": false,
       "weightSameInitialClass": 25,
-      "weightSameInitialClassEnabled": true,
+      "weightSameInitialClassEnabled": false,
       "weightSameClass": 15,
-      "weightSameClassEnabled": true,
+      "weightSameClassEnabled": false,
       "weightExecutableInAncestry": 30,
-      "weightExecutableInAncestryEnabled": true,
+      "weightExecutableInAncestryEnabled": false,
       "minScore": 40
     },
     "schema": [
@@ -153,7 +153,7 @@
         "key": "weightSameExecutableEnabled",
         "type": "boolean",
         "label": "Use weight: same executable",
-        "defaultValue": true
+        "defaultValue": false
       },
       {
         "key": "weightSameInitialClass",
@@ -169,7 +169,7 @@
         "key": "weightSameInitialClassEnabled",
         "type": "boolean",
         "label": "Use weight: same initial class",
-        "defaultValue": true
+        "defaultValue": false
       },
       {
         "key": "weightSameClass",
@@ -185,7 +185,7 @@
         "key": "weightSameClassEnabled",
         "type": "boolean",
         "label": "Use weight: same class",
-        "defaultValue": true
+        "defaultValue": false
       },
       {
         "key": "weightExecutableInAncestry",
@@ -201,7 +201,7 @@
         "key": "weightExecutableInAncestryEnabled",
         "type": "boolean",
         "label": "Use weight: executable in ancestry",
-        "defaultValue": true
+        "defaultValue": false
       },
       {
         "key": "minScore",
