@@ -95,6 +95,8 @@ Item {
   readonly property int launchTtl: Math.round(Number(setting("launchTtl")))
   readonly property int matchWindow: Math.round(Number(setting("matchWindow")))
   readonly property bool moveWindows: setting("moveWindows") === true
+  readonly property bool onlyWhileLoading: setting("onlyWhileLoading") === true
+  readonly property string ignoredClasses: String(setting("ignoredClasses") || "")
   readonly property int minScore: Math.round(Number(setting("minScore")) || 0)
 
   // Points each signal adds when the script matches a new window to a launch.
@@ -419,6 +421,64 @@ Item {
           foreground: root.foreground
           fontFamily: root.fontFamily
           onClicked: root.saveSetting("moveWindows", !root.moveWindows)
+        }
+
+        Toggle {
+          width: parent.width
+          label: "Only follow loading apps"
+          description: root.onlyWhileLoading
+            ? "New windows of apps already open stay where they open"
+            : "Any matching window is moved, even for apps already open"
+          checked: root.onlyWhileLoading
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.saveSetting("onlyWhileLoading", !root.onlyWhileLoading)
+        }
+
+        // ---------- Ignored apps ----------
+        Column {
+          width: parent.width
+          spacing: Style.space(8)
+
+          PanelSectionHeader {
+            text: "IGNORED APPS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          TextField {
+            id: ignoredField
+            width: parent.width
+            text: root.ignoredClasses
+            placeholderText: "com.mitchellh.ghostty, brave-browser"
+            foreground: root.foreground
+            font.family: root.fontFamily
+
+            // Saved tidied up when editing ends; Escape drops the edit.
+            onEditingFinished: {
+              var classes = text.split(",").map(function(c) { return c.trim() })
+                .filter(function(c) { return c !== "" })
+              root.saveSetting("ignoredClasses", classes.join(", "))
+              text = Qt.binding(function() { return root.ignoredClasses })
+            }
+            Keys.onEscapePressed: function(event) {
+              text = Qt.binding(function() { return root.ignoredClasses })
+              keyCatcher.forceActiveFocus()
+              event.accepted = true
+            }
+          }
+
+          Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: "Comma-separated window classes the tracker never moves. "
+              + "Find an app's class with hyprctl clients."
+            color: root.foreground
+            opacity: 0.6
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
 
         PanelSeparator { foreground: root.foreground }

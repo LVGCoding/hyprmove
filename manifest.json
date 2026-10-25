@@ -23,6 +23,8 @@
       "matchWindow": 5,
       "moveWindows": true,
       "verbose": true,
+      "onlyWhileLoading": true,
+      "ignoredClasses": "",
       "weightSamePid": 100,
       "weightSamePidEnabled": true,
       "weightLaunchAncestor": 80,
@@ -74,6 +76,20 @@
         "type": "boolean",
         "label": "Verbose logging",
         "defaultValue": true
+      },
+      {
+        "key": "onlyWhileLoading",
+        "type": "boolean",
+        "label": "Only follow loading apps",
+        "defaultValue": true,
+        "description": "A tiled window only joins a launch that has no open tiled window yet, so new windows of apps that are already open (Ghostty, Brave) stay where they open. Floating windows, like GIMP's welcome window, still join."
+      },
+      {
+        "key": "ignoredClasses",
+        "type": "string",
+        "label": "Ignored apps",
+        "defaultValue": "",
+        "description": "Comma-separated window classes that are never moved, e.g. com.mitchellh.ghostty, brave-browser."
       },
       {
         "key": "weightSamePid",

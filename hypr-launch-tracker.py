@@ -33,6 +33,18 @@ MOVE_WINDOWS = True
 # Print detailed process information.
 VERBOSE = False
 
+# Only let a tiled window join a launch that is still loading, i.e. has
+# no open tiled window yet. Single-process apps like Ghostty and Brave
+# own every window they open, so without this a new window matches the
+# app's last launch on its PID and is pulled back to that workspace.
+# Floating windows (dialogs, welcome screens like GIMP's) still join
+# launches that are already open.
+ONLY_WHILE_LOADING = True
+
+# Comma-separated window classes the tracker never moves or tracks.
+# Matched case-insensitively against the class and initial class.
+IGNORED_CLASSES = ""
+
 # Points each signal adds when matching a new window to a launch.
 # A window is only moved if its best launch scores at least
 # MIN_SCORE and no other launch ties with it. A signal adds nothing
@@ -75,6 +87,8 @@ CONFIG_KEYS = {
     "matchWindow": ("MATCH_WINDOW", float, 1),
     "moveWindows": ("MOVE_WINDOWS", bool, None),
     "verbose": ("VERBOSE", bool, None),
+    "onlyWhileLoading": ("ONLY_WHILE_LOADING", bool, None),
+    "ignoredClasses": ("IGNORED_CLASSES", str, None),
     "weightSamePid": ("WEIGHT_SAME_PID", int, 0),
     "weightLaunchAncestor": ("WEIGHT_LAUNCH_ANCESTOR", int, 0),
     "weightDescendant": ("WEIGHT_DESCENDANT", int, 0),
@@ -124,6 +138,8 @@ class WindowInfo:
     process: Optional[ProcessInfo]
     ancestors: list[ProcessInfo]
 
+    floating: bool = False
+
     created_at: float = field(default_factory=time.monotonic)
 
 
@@ -138,8 +154,13 @@ class LaunchRecord:
     expires_at: float
 
     # Windows/processes that have been associated with this launch.
+    # Closed windows stay in `windows` for their process ancestry.
     windows: dict[str, WindowInfo] = field(default_factory=dict)
     pids: set[int] = field(default_factory=set)
+
+    # Addresses of this launch's tiled windows that are still open.
+    # While this is empty the launch is still loading.
+    open_tiled: set[str] = field(default_factory=set)
 
     # Useful identity information from the initial window.
     executables: set[str] = field(default_factory=set)
@@ -216,6 +237,9 @@ def coerce_setting(kind, minimum, value):
 
     if kind is bool:
         return value if isinstance(value, bool) else None
+
+    if kind is str:
+        return value if isinstance(value, str) else None
 
     if isinstance(value, bool):
         return None
@@ -578,6 +602,8 @@ def make_window_info(
     process = read_process(pid)
     ancestors = get_process_tree(pid)
 
+    floating = client.get("floating") is True
+
     return WindowInfo(
         address=address,
         workspace=workspace_name,
@@ -589,6 +615,7 @@ def make_window_info(
         initial_title=initial_title,
         process=process,
         ancestors=ancestors,
+        floating=floating,
     )
 
 
@@ -607,6 +634,7 @@ def print_window(window: WindowInfo):
     log(f"initial class : {window.initial_class}")
     log(f"title         : {window.title}")
     log(f"initial title : {window.initial_title}")
+    log(f"floating      : {window.floating}")
 
     if window.process:
         p = window.process
@@ -738,6 +766,10 @@ def find_matching_launch(window: WindowInfo):
     candidates = []
 
     for launch in launches.values():
+        if ONLY_WHILE_LOADING and not window.floating and launch.open_tiled:
+            verbose(f"  skip launch #{launch.id}: already has an open tiled window")
+            continue
+
         score, reasons = score_match(window, launch)
 
         if score > 0:
@@ -819,6 +851,9 @@ def add_window_to_launch(
     if window.initial_class:
         launch.initial_classes.add(window.initial_class)
 
+    if not window.floating:
+        launch.open_tiled.add(window.address)
+
     # Every related window extends the lifetime of the launch.
     launch.expires_at = time.monotonic() + LAUNCH_TTL
 
@@ -840,6 +875,19 @@ def expire_launches():
 # ============================================================
 # Window handling
 # ============================================================
+
+
+def is_ignored(window: WindowInfo) -> bool:
+    ignored = {c.strip().lower() for c in IGNORED_CLASSES.split(",") if c.strip()}
+
+    return bool(ignored & {window.class_name.lower(), window.initial_class.lower()})
+
+
+def handle_window_close(address: str):
+    address = normalize_address(address)
+
+    for launch in launches.values():
+        launch.open_tiled.discard(address)
 
 
 def handle_window_open(
@@ -864,6 +912,10 @@ def handle_window_open(
         return
 
     print_window(window)
+
+    if is_ignored(window):
+        log("  ignored class, not tracking")
+        return
 
     # --------------------------------------------------------
     # Try to associate with an existing launch
@@ -960,6 +1012,10 @@ def handle_event(line: str):
     event, data = parsed
 
     # verbose(f"EVENT: {event} >> {data}")
+
+    if event == "closewindow":
+        handle_window_close(data)
+        return
 
     if event != "openwindow":
         return
